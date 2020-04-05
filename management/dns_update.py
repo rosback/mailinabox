@@ -881,7 +881,7 @@ def get_secondary_dns(custom_dns, domain, mode=None):
 				for dom in hostname[4:].split(";"):
 					if dom == "all":
 						domains = []
-						continue
+						break
 					domains.append(dom)
 				continue
 			# if the domain in question is not specied (or not "all") skip it.
