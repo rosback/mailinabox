@@ -183,7 +183,7 @@ def build_zone(domain, domain_properties, additional_records, env, is_zone=True)
 
 		# NS record to ns2.PRIMARY_HOSTNAME or whatever the user overrides.
 		# User may provide one or more additional nameservers
-		secondary_ns_list = get_secondary_dns(additional_records, mode="NS") \
+		secondary_ns_list = get_secondary_dns(additional_records, domain, mode="NS") \
 			or ["ns2." + env["PRIMARY_HOSTNAME"]]
 		for secondary_ns in secondary_ns_list:
 			records.append((None,  "NS", secondary_ns+'.', False))
@@ -617,7 +617,7 @@ zone:
 
 		# If custom secondary nameservers have been set, allow zone transfers
 		# and, if not a subnet, notifies to them.
-		for ipaddr in get_secondary_dns(additional_records, mode="xfr"):
+		for ipaddr in get_secondary_dns(additional_records, domain, mode="xfr"):
 			if "/" not in ipaddr:
 				nsdconf += "\n\tnotify: %s NOKEY" % (ipaddr)
 			nsdconf += "\n\tprovide-xfr: %s NOKEY\n" % (ipaddr)
@@ -980,11 +980,12 @@ def set_custom_dns_record(qname, rtype, value, action, env):
 
 ########################################################################
 
-def get_secondary_dns(custom_dns, mode=None):
+def get_secondary_dns(custom_dns, domain, mode=None):
 	resolver = dns.resolver.get_default_resolver()
 	resolver.timeout = 10
 
 	values = []
+	domains = []
 	for qname, rtype, value in custom_dns:
 		if qname != '_secondary_nameserver': continue
 		for hostname in value.split(" "):
@@ -993,6 +994,19 @@ def get_secondary_dns(custom_dns, mode=None):
 				# Just return the setting.
 				values.append(hostname)
 				continue
+
+			# This is a domain specifier
+			# For example: ns2.forall.com dom:domain1.org;domain2.com ns2.fordomain1and2.com xfr:1.2.3.4 dom:domain3.com ns2.fordomain3.com xfr:2.3.4.5
+			if hostname.startswith("dom:"):
+				domains = []
+				for dom in hostname[4:].split(";"):
+					if dom == "all":
+						domains = []
+						break
+					domains.append(dom)
+				continue
+			# if the domain in question is not specied (or not "all") skip it.
+			if domains and domain and domain not in domains: continue
 
 			# This is a hostname. Before including in zone xfr lines,
 			# resolve to an IP address. Otherwise just return the hostname.
@@ -1022,7 +1036,7 @@ def set_secondary_dns(hostnames, env):
 		resolver = dns.resolver.get_default_resolver()
 		resolver.timeout = 5
 		for item in hostnames:
-			if not item.startswith("xfr:"):
+			if not item.startswith("xfr:") and not item.startswith("dom:"):
 				# Resolve hostname.
 				try:
 					response = resolver.query(item, "A")
@@ -1031,7 +1045,7 @@ def set_secondary_dns(hostnames, env):
 						response = resolver.query(item, "AAAA")
 					except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
 						raise ValueError("Could not resolve the IP address of %s." % item)
-			else:
+			elif item.startswith("xfr:"):
 				# Validate IP address.
 				try:
 					if "/" in item[4:]:

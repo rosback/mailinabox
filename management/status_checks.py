@@ -501,7 +501,7 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 
 	custom_dns_records = list(get_custom_dns_config(env)) # generator => list so we can reuse it
 	correct_ip = "; ".join(sorted(get_custom_dns_records(custom_dns_records, domain, "A"))) or env['PUBLIC_IP']
-	custom_secondary_ns = get_secondary_dns(custom_dns_records, mode="NS")
+	custom_secondary_ns = get_secondary_dns(custom_dns_records,domain, mode="NS")
 	secondary_ns = custom_secondary_ns or ["ns2." + env['PRIMARY_HOSTNAME']]
 
 	existing_ns = query_dns(domain, "NS")
