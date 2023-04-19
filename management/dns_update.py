@@ -96,9 +96,18 @@ def do_dns_update(env, force=False):
 		if len(updated_domains) == 0:
 			updated_domains.append("DNS configuration")
 
-	# Kick nsd if anything changed.
+	# Tell nsd to reload changed zone files.
 	if len(updated_domains) > 0:
-		shell('check_call', ["/usr/sbin/service", "nsd", "restart"])
+		# 'reconfig' is needed if there are added or removed zones, but
+		# it may not reload existing zones, so we call 'reload' too. If
+		# nsd isn't running, nsd-control fails, so in that case revert
+		# to restarting nsd to make sure it is running. Restarting nsd
+		# should also refresh everything.
+		try:
+			shell('check_call', ["/usr/sbin/nsd-control", "reconfig"])
+			shell('check_call', ["/usr/sbin/nsd-control", "reload"])
+		except:
+			shell('check_call', ["/usr/sbin/service", "nsd", "restart"])
 
 	# Write the OpenDKIM configuration tables for all of the mail domains.
 	from mailconfig import get_mail_domains
@@ -298,7 +307,7 @@ def build_zone(domain, domain_properties, additional_records, env, is_zone=True)
 		# Append a DMARC record.
 		# Skip if the user has set a DMARC record already.
 		if not has_rec("_dmarc", "TXT", prefix="v=DMARC1; "):
-			records.append(("_dmarc", "TXT", 'v=DMARC1; p=quarantine', "Recommended. Specifies that mail that does not originate from the box but claims to be from @%s or which does not have a valid DKIM signature is suspect and should be quarantined by the recipient's mail system." % domain))
+			records.append(("_dmarc", "TXT", 'v=DMARC1; p=quarantine;', "Recommended. Specifies that mail that does not originate from the box but claims to be from @%s or which does not have a valid DKIM signature is suspect and should be quarantined by the recipient's mail system." % domain))
 
 	if domain_properties[domain]["user"]:
 		# Add CardDAV/CalDAV SRV records on the non-primary hostname that points to the primary hostname
@@ -363,7 +372,7 @@ def build_zone(domain, domain_properties, additional_records, env, is_zone=True)
 			if not has_rec(qname, "TXT", prefix="v=spf1 "):
 				records.append((qname,  "TXT", 'v=spf1 -all', "Recommended. Prevents use of this domain name for outbound mail by specifying that no servers are valid sources for mail from @%s. If you do send email from this domain name you should either override this record such that the SPF rule does allow the originating server, or, take the recommended approach and have the box handle mail for this domain (simply add any receiving alias at this domain name to make this machine treat the domain name as one of its mail domains)." % d))
 			if not has_rec("_dmarc" + ("."+qname if qname else ""), "TXT", prefix="v=DMARC1; "):
-				records.append(("_dmarc" + ("."+qname if qname else ""), "TXT", 'v=DMARC1; p=reject', "Recommended. Prevents use of this domain name for outbound mail by specifying that the SPF rule should be honoured for mail from @%s." % d))
+				records.append(("_dmarc" + ("."+qname if qname else ""), "TXT", 'v=DMARC1; p=reject;', "Recommended. Prevents use of this domain name for outbound mail by specifying that the SPF rule should be honoured for mail from @%s." % d))
 
 			# And with a null MX record (https://explained-from-first-principles.com/email/#null-mx-record)
 			if not has_rec(qname, "MX"):
@@ -484,7 +493,7 @@ def write_nsd_zone(domain, zonefile, records, env, force):
 	# @ the PRIMARY_HOSTNAME. Hopefully that's legit.
 	#
 	# For the refresh through TTL fields, a good reference is:
-	# http://www.peerwisdom.org/2013/05/15/dns-understanding-the-soa-record/
+	# https://www.ripe.net/publications/docs/ripe-203
 	#
 	# A hash of the available DNSSEC keys are added in a comment so that when
 	# the keys change we force a re-generation of the zone which triggers
@@ -497,7 +506,7 @@ $TTL 86400          ; default time to live
 @ IN SOA ns1.{primary_domain}. hostmaster.{primary_domain}. (
            __SERIAL__     ; serial number
            7200     ; Refresh (secondary nameserver update interval)
-           86400    ; Retry (when refresh fails, how often to try again)
+           3600     ; Retry (when refresh fails, how often to try again, should be lower than the refresh)
            1209600  ; Expire (when refresh fails, how long secondary nameserver will keep records around anyway)
            86400    ; Negative TTL (how long negative responses are cached)
            )
@@ -604,7 +613,7 @@ def get_dns_zonefile(zone, env):
 
 def write_nsd_conf(zonefiles, additional_records, env):
 	# Write the list of zones to a configuration file.
-	nsd_conf_file = "/etc/nsd/zones.conf"
+	nsd_conf_file = "/etc/nsd/nsd.conf.d/zones.conf"
 	nsdconf = ""
 
 	# Append the zones.
@@ -806,7 +815,8 @@ def write_opendkim_tables(domains, env):
 
 def get_custom_dns_config(env, only_real_records=False):
 	try:
-		custom_dns = rtyaml.load(open(os.path.join(env['STORAGE_ROOT'], 'dns/custom.yaml')))
+		with open(os.path.join(env['STORAGE_ROOT'], 'dns/custom.yaml'), 'r') as f:
+			custom_dns = rtyaml.load(f)
 		if not isinstance(custom_dns, dict): raise ValueError() # caught below
 	except:
 		return [ ]
@@ -983,6 +993,7 @@ def set_custom_dns_record(qname, rtype, value, action, env):
 def get_secondary_dns(custom_dns, domain, mode=None):
 	resolver = dns.resolver.get_default_resolver()
 	resolver.timeout = 10
+	resolver.lifetime = 10
 
 	values = []
 	domains = []
@@ -1014,10 +1025,17 @@ def get_secondary_dns(custom_dns, domain, mode=None):
 			# doesn't.
 			if not hostname.startswith("xfr:"):
 				if mode == "xfr":
-					response = dns.resolver.query(hostname+'.', "A", raise_on_no_answer=False)
-					values.extend(map(str, response))
-					response = dns.resolver.query(hostname+'.', "AAAA", raise_on_no_answer=False)
-					values.extend(map(str, response))
+					try:
+						response = resolver.resolve(hostname+'.', "A", raise_on_no_answer=False)
+						values.extend(map(str, response))
+					except dns.exception.DNSException:
+						pass
+						
+					try:
+						response = resolver.resolve(hostname+'.', "AAAA", raise_on_no_answer=False)
+						values.extend(map(str, response))
+					except dns.exception.DNSException:
+						pass
 					continue
 				values.append(hostname)
 
@@ -1035,15 +1053,17 @@ def set_secondary_dns(hostnames, env):
 		# Validate that all hostnames are valid and that all zone-xfer IP addresses are valid.
 		resolver = dns.resolver.get_default_resolver()
 		resolver.timeout = 5
+		resolver.lifetime = 5
+		
 		for item in hostnames:
 			if not item.startswith("xfr:") and not item.startswith("dom:"):
 				# Resolve hostname.
 				try:
-					response = resolver.query(item, "A")
-				except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+					response = resolver.resolve(item, "A")
+				except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.Timeout):
 					try:
-						response = resolver.query(item, "AAAA")
-					except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+						response = resolver.resolve(item, "AAAA")
+					except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.Timeout):
 						raise ValueError("Could not resolve the IP address of %s." % item)
 			elif item.startswith("xfr:"):
 				# Validate IP address.
@@ -1076,7 +1096,7 @@ def get_custom_dns_records(custom_dns, qname, rtype):
 def build_recommended_dns(env):
 	ret = []
 	for (domain, zonefile, records) in build_zones(env):
-		# remove records that we don't dislay
+		# remove records that we don't display
 		records = [r for r in records if r[3] is not False]
 
 		# put Required at the top, then Recommended, then everythiing else

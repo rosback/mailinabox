@@ -95,6 +95,12 @@ def run_services_checks(env, output, pool):
 		fatal = fatal or fatal2
 		output2.playback(output)
 
+	# Check fail2ban.
+	code, ret = shell('check_output', ["fail2ban-client", "status"], capture_stderr=True, trap=True)
+	if code != 0:
+		output.print_error("fail2ban is not running.")
+		all_running = False
+
 	if all_running:
 		output.print_ok("All system services are running.")
 
@@ -135,7 +141,7 @@ def check_service(i, service, env):
 
 			# IPv4 ok but IPv6 failed. Try the PRIVATE_IPV6 address to see if the service is bound to the interface.
 			elif service["port"] != 53 and try_connect(env["PRIVATE_IPV6"]):
-				output.print_error("%s is running (and available over IPv4 and the local IPv6 address), but it is not publicly accessible at %s:%d." % (service['name'], env['PUBLIC_IP'], service['port']))
+				output.print_error("%s is running (and available over IPv4 and the local IPv6 address), but it is not publicly accessible at %s:%d." % (service['name'], env['PUBLIC_IPV6'], service['port']))
 			else:
 				output.print_error("%s is running and available over IPv4 but is not accessible over IPv6 at %s port %d." % (service['name'], env['PUBLIC_IPV6'], service['port']))
 
@@ -207,7 +213,8 @@ def check_ssh_password(env, output):
 	# the configuration file.
 	if not os.path.exists("/etc/ssh/sshd_config"):
 		return
-	sshd = open("/etc/ssh/sshd_config").read()
+	with open("/etc/ssh/sshd_config", "r") as f:
+		sshd = f.read()
 	if re.search("\nPasswordAuthentication\s+yes", sshd) \
 		or not re.search("\nPasswordAuthentication\s+no", sshd):
 		output.print_error("""The SSH server on this machine permits password-based login. A more secure
@@ -253,6 +260,18 @@ def check_free_disk_space(rounded_values, env, output):
 		if rounded_values: disk_msg = "The disk has less than 15% free space."
 		output.print_error(disk_msg)
 
+	# Check that there's only one duplicity cache. If there's more than one,
+	# it's probably no longer in use, and we can recommend clearing the cache
+	# to save space. The cache directory may not exist yet, which is OK.
+	backup_cache_path = os.path.join(env['STORAGE_ROOT'], 'backup/cache')
+	try:
+		backup_cache_count = len(os.listdir(backup_cache_path))
+	except:
+		backup_cache_count = 0
+	if backup_cache_count > 1:
+		output.print_warning("The backup cache directory {} has more than one backup target cache. Consider clearing this directory to save disk space."
+			.format(backup_cache_path))
+
 def check_free_memory(rounded_values, env, output):
 	# Check free memory.
 	percent_free = 100 - psutil.virtual_memory().percent
@@ -296,6 +315,8 @@ def run_network_checks(env, output):
 		output.print_ok("IP address is not blacklisted by zen.spamhaus.org.")
 	elif zen == "[timeout]":
 		output.print_warning("Connection to zen.spamhaus.org timed out. We could not determine whether your server's IP address is blacklisted. Please try again later.")
+	elif zen == "[Not Set]":
+		output.print_warning("Could not connect to zen.spamhaus.org. We could not determine whether your server's IP address is blacklisted. Please try again later.")
 	else:
 		output.print_error("""The IP address of this machine %s is listed in the Spamhaus Block List (code %s),
 			which may prevent recipients from receiving your email. See http://www.spamhaus.org/query/ip/%s."""
@@ -529,7 +550,7 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 		for ns in custom_secondary_ns:
 			# We must first resolve the nameserver to an IP address so we can query it.
 			ns_ips = query_dns(ns, "A")
-			if not ns_ips:
+			if not ns_ips or ns_ips in {'[Not Set]', '[timeout]'}:
 				output.print_error("Secondary nameserver %s is not valid (it doesn't resolve to an IP address)." % ns)
 				continue
 			# Choose the first IP if nameserver returns multiple
@@ -580,7 +601,8 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 			# record that we suggest using is for the KSK (and that's how the DS records were generated).
 			# We'll also give the nice name for the key algorithm.
 			dnssec_keys = load_env_vars_from_file(os.path.join(env['STORAGE_ROOT'], 'dns/dnssec/%s.conf' % alg_name_map[ds_alg]))
-			dnsssec_pubkey = open(os.path.join(env['STORAGE_ROOT'], 'dns/dnssec/' + dnssec_keys['KSK'] + '.key')).read().split("\t")[3].split(" ")[3]
+			with open(os.path.join(env['STORAGE_ROOT'], 'dns/dnssec/' + dnssec_keys['KSK'] + '.key'), 'r') as f:
+				dnsssec_pubkey = f.read().split("\t")[3].split(" ")[3]
 
 			expected_ds_records[ (ds_keytag, ds_alg, ds_digalg, ds_digest) ] = {
 				"record": rr_ds,
@@ -612,14 +634,16 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 			#
 			# But it may not be preferred. Only algorithm 13 is preferred. Warn if any of the
 			# matched zones uses a different algorithm.
-			if set(r[1] for r in matched_ds) == { '13' }: # all are alg 13
+			if set(r[1] for r in matched_ds) == { '13' } and set(r[2] for r in matched_ds) <= { '2', '4' }: # all are alg 13 and digest type 2 or 4
 				output.print_ok("DNSSEC 'DS' record is set correctly at registrar.")
 				return
-			elif '13' in set(r[1] for r in matched_ds): # some but not all are alg 13
-				output.print_ok("DNSSEC 'DS' record is set correctly at registrar. (Records using algorithm other than ECDSAP256SHA256 should be removed.)")
+			elif len([r for r in matched_ds if r[1] == '13' and r[2] in ( '2', '4' )]) > 0: # some but not all are alg 13
+				output.print_ok("DNSSEC 'DS' record is set correctly at registrar. (Records using algorithm other than ECDSAP256SHA256 and digest types other than SHA-256/384 should be removed.)")
 				return
 			else: # no record uses alg 13
-				output.print_warning("DNSSEC 'DS' record set at registrar is valid but should be updated to ECDSAP256SHA256 (see below).")
+				output.print_warning("""DNSSEC 'DS' record set at registrar is valid but should be updated to ECDSAP256SHA256 and SHA-256 (see below).
+				IMPORTANT: Do not delete existing DNSSEC 'DS' records for this domain until confirmation that the new DNSSEC 'DS' record
+				for this domain is valid.""")
 		else:
 			if is_checking_primary:
 				output.print_error("""The DNSSEC 'DS' record for %s is incorrect. See further details below.""" % domain)
@@ -630,7 +654,8 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 
 	output.print_line("""Follow the instructions provided by your domain name registrar to set a DS record.
 		Registrars support different sorts of DS records. Use the first option that works:""")
-	preferred_ds_order = [(7, 1), (7, 2), (8, 4), (13, 4), (8, 1), (8, 2), (13, 1), (13, 2)] # low to high
+	preferred_ds_order = [(7, 2), (8, 4), (13, 4), (8, 2), (13, 2)] # low to high, see https://github.com/mail-in-a-box/mailinabox/issues/1998
+
 	def preferred_ds_order_func(ds_suggestion):
 		k = (int(ds_suggestion['alg']), int(ds_suggestion['digalg']))
 		if k in preferred_ds_order:
@@ -638,11 +663,12 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 		return -1 # index before first item
 	output.print_line("")
 	for i, ds_suggestion in enumerate(sorted(expected_ds_records.values(), key=preferred_ds_order_func, reverse=True)):
+		if preferred_ds_order_func(ds_suggestion) == -1: continue # don't offer record types that the RFC says we must not offer
 		output.print_line("")
 		output.print_line("Option " + str(i+1) + ":")
 		output.print_line("----------")
 		output.print_line("Key Tag: " + ds_suggestion['keytag'])
-		output.print_line("Key Flags: KSK")
+		output.print_line("Key Flags: KSK / 257")
 		output.print_line("Algorithm: %s / %s" % (ds_suggestion['alg'], ds_suggestion['alg_name']))
 		output.print_line("Digest Type: %s / %s" % (ds_suggestion['digalg'], ds_suggestion['digalg_name']))
 		output.print_line("Digest: " + ds_suggestion['digest'])
@@ -654,7 +680,7 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 	if len(ds) > 0:
 		output.print_line("")
 		output.print_line("The DS record is currently set to:")
-		for rr in ds:
+		for rr in sorted(ds):
 			output.print_line("Key Tag: {0}, Algorithm: {1}, Digest Type: {2}, Digest: {3}".format(*rr))
 
 def check_mail_domain(domain, env, output):
@@ -699,7 +725,7 @@ def check_mail_domain(domain, env, output):
 		output.print_ok(good_news)
 
 		# Check MTA-STS policy.
-		loop = asyncio.get_event_loop()
+		loop = asyncio.new_event_loop()
 		sts_resolver = postfix_mta_sts_resolver.resolver.STSResolver(loop=loop)
 		valid, policy = loop.run_until_complete(sts_resolver.resolve(domain))
 		if valid == postfix_mta_sts_resolver.resolver.STSFetchResult.VALID:
@@ -728,6 +754,8 @@ def check_mail_domain(domain, env, output):
 		output.print_ok("Domain is not blacklisted by dbl.spamhaus.org.")
 	elif dbl == "[timeout]":
 		output.print_warning("Connection to dbl.spamhaus.org timed out. We could not determine whether the domain {} is blacklisted. Please try again later.".format(domain))
+	elif dbl == "[Not Set]":
+		output.print_warning("Could not connect to dbl.spamhaus.org. We could not determine whether the domain {} is blacklisted. Please try again later.".format(domain))
 	else:
 		output.print_error("""This domain is listed in the Spamhaus Domain Block List (code %s),
 			which may prevent recipients from receiving your mail.
@@ -772,16 +800,21 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 	# running bind server), or if the 'at' argument is specified, use that host
 	# as the nameserver.
 	resolver = dns.resolver.get_default_resolver()
-	if at:
+	
+	# Make sure at is not a string that cannot be used as a nameserver
+	if at and at not in {'[Not set]', '[timeout]'}:
 		resolver = dns.resolver.Resolver()
 		resolver.nameservers = [at]
 
 	# Set a timeout so that a non-responsive server doesn't hold us back.
 	resolver.timeout = 5
+	# The number of seconds to spend trying to get an answer to the question. If the
+	# lifetime expires a dns.exception.Timeout exception will be raised.
+	resolver.lifetime = 5
 
 	# Do the query.
 	try:
-		response = resolver.query(qname, rtype)
+		response = resolver.resolve(qname, rtype)
 	except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
 		# Host did not have an answer for this query; not sure what the
 		# difference is between the two exceptions.
@@ -931,7 +964,8 @@ def run_and_output_changes(env, pool):
 	# Load previously saved status checks.
 	cache_fn = "/var/cache/mailinabox/status_checks.json"
 	if os.path.exists(cache_fn):
-		prev = json.load(open(cache_fn))
+		with open(cache_fn, 'r') as f:
+			prev = json.load(f)
 
 		# Group the serial output into categories by the headings.
 		def group_by_heading(lines):

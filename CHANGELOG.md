@@ -1,6 +1,139 @@
 CHANGELOG
 =========
 
+Version 61.1 (January 28, 2023)
+-------------------------------
+
+* Fixed rsync backups not working with the default port.
+* Reverted "Improve error messages in the management tools when external command-line tools are run." because of the possibility of user secrets being included in error messages.
+* Fix for TLS certificate SHA fingerprint not being displayed during setup.
+
+Version 61 (January 21, 2023)
+-----------------------------
+
+System:
+
+* fail2ban didn't start after setup.
+
+Mail:
+
+* Disable Roundcube password plugin since it was corrupting the user database.
+
+Control panel:
+
+* Fix changing existing backup settings when the rsync type is used.
+* Allow setting a custom port for rsync backups.
+* Fixes to DNS lookups during status checks when there are timeouts, enforce timeouts better.
+* A new check is added to ensure fail2ban is running.
+* Fixed a color.
+* Improve error messages in the management tools when external command-line tools are run.
+
+Version 60.1 (October 30, 2022)
+-------------------------------
+
+* A setup issue where the DNS server nsd isn't running at the end of setup is (hopefully) fixed.
+* Nextcloud is updated to 23.0.10 (contacts to 4.2.2, calendar to 3.5.1).
+
+Version 60 (October 11, 2022)
+-----------------------------
+
+This is the first release for Ubuntu 22.04.
+
+**Before upgrading**, you must **first upgrade your existing Ubuntu 18.04 box to Mail-in-a-Box v0.51 or later**, if you haven't already done so. That may not be possible after Ubuntu 18.04 reaches its end of life in April 2023, so please complete the upgrade well before then. (If you are not using Nextcloud's contacts or calendar, you can migrate to the latest version of Mail-in-a-Box from any previous version.)
+
+For complete upgrade instructions, see:
+
+https://discourse.mailinabox.email/t/version-60-for-ubuntu-22-04-is-about-to-be-released/9558
+
+No major features of Mail-in-a-Box have changed in this release, although some minor fixes were made.
+
+With the newer version of Ubuntu the following software packages we use are updated:
+
+* dovecot is upgraded to 2.3.16, postfix to 3.6.4, opendmark to 1.4 (which adds ARC-Authentication-Results headers), and spampd to 2.53 (alleviating a mail delivery rate limiting bug).
+* Nextcloud is upgraded to 23.0.4 (contacts to 4.2.0, calendar to 3.5.0).
+* Roundcube is upgraded to 1.6.0.
+* certbot is upgraded to 1.21 (via the Ubuntu repository instead of a PPA).
+* fail2ban is upgraded to 0.11.2.
+* nginx is upgraded to 1.18.
+* PHP is upgraded from 7.2 to 8.0.
+
+Also:
+
+* Roundcube's login session cookie was tightened. Existing sessions may require a manual logout.
+* Moved Postgrey's database under $STORAGE_ROOT.
+
+Version 57a (June 19, 2022)
+---------------------------
+
+* The Backblaze backups fix posted in Version 57 was incomplete. It's now fixed.
+
+Version 57 (June 12, 2022)
+--------------------------
+
+Setup:
+
+* Fixed issue upgrading from Mail-in-a-Box v0.40-v0.50 because of a changed URL that Nextcloud is downloaded from.
+
+Backups:
+
+* Fixed S3 backups which broke with duplicity 0.8.23.
+* Fixed Backblaze backups which broke with latest b2sdk package by rolling back its version.
+
+Control panel:
+
+* Fixed spurious changes in system status checks messages by sorting DNSSEC DS records.
+* Fixed fail2ban lockout over IPv6 from excessive loads of the system status checks.
+* Fixed an incorrect IPv6 system status check message.
+
+Version 56 (January 19, 2022)
+-----------------------------
+
+Software updates:
+
+* Roundcube updated to 1.5.2 (from 1.5.0), and the persistent_login and CardDAV (to 4.3.0 from 3.0.3) plugins are updated.
+* Nextcloud updated to 20.0.14 (from 20.0.8), contacts to 4.0.7 (from 3.5.1), and calendar to 3.0.4 (from 2.2.0).
+
+Setup:
+
+* Fixed failed setup if a previous attempt failed while updating Nextcloud.
+
+Control panel:
+
+* Fixed a crash if a custom DNS entry is not under a zone managed by the box.
+* Fix DNSSEC instructions typo.
+
+Other:
+
+* Set systemd journald log retention to 10 days (from no limit) to reduce disk usage.
+* Fixed log processing for submission lines that have a sasl_sender or other extra information.
+* Fix DNS secondary nameserver refesh failure retry period.
+
+Version 55 (October 18, 2021)
+-----------------------------
+
+Mail:
+
+* "SMTPUTF8" is now disabled in Postfix. Because Dovecot still does not support SMTPUTF8, incoming mail to internationalized addresses was bouncing. This fixes incoming mail to internationalized domains (which was probably working prior to v0.40), but it will prevent sending outbound mail to addresses with internationalized local-parts.
+* Upgraded to Roundcube 1.5.
+
+Control panel:
+
+* The control panel menus are now hidden before login, but now non-admins can log in to access the mail and contacts/calendar instruction pages.
+* The login form now disables browser autocomplete in the two-factor authentication code field.
+* After logging in, the default page is now a fast-loading welcome page rather than the slow-loading system status checks page.
+* The backup retention period option now displays for B2 backup targets.
+* The DNSSEC DS record recommendations are cleaned up and now recommend changing records that use SHA1.
+* The Munin monitoring pages no longer require a separate HTTP basic authentication login and can be used if two-factor authentication is turned on.
+* Control panel logins are now tied to a session backend that allows true logouts (rather than an encrypted cookie).
+* Failed logins no longer directly reveal whether the email address corresponds to a user account.
+* Browser dark mode now inverts the color scheme.
+
+Other:
+
+* Fail2ban's IPv6 support is enabled.
+* The mail log tool now doesn't crash if there are email addresess in log messages with invalid UTF-8 characters.
+* Additional nsd.conf files can be placed in /etc/nsd.conf.d.
+
 v0.54 (June 20, 2021)
 ---------------------
 

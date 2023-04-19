@@ -23,7 +23,7 @@ Additionally, this project has a [Code of Conduct](CODE_OF_CONDUCT.md), which su
 In The Box
 ----------
 
-Mail-in-a-Box turns a fresh Ubuntu 18.04 LTS 64-bit machine into a working mail server by installing and configuring various components.
+Mail-in-a-Box turns a fresh Ubuntu 22.04 LTS 64-bit machine into a working mail server by installing and configuring various components.
 
 It is a one-click email appliance. There are no user-configurable setup options. It "just works."
 
@@ -42,6 +42,8 @@ It also includes system management tools:
 * A control panel for adding/removing mail users, aliases, custom DNS records, configuring backups, etc.
 * An API for all of the actions on the control panel
 
+Internationalized domain names are supported and configured easily (but SMTPUTF8 is not supported, unfortunately).
+
 It also supports static website hosting since the box is serving HTTPS anyway. (To serve a website for your domains elsewhere, just add a custom DNS "A" record in you Mail-in-a-Box's control panel to point domains to another server.)
 
 For more information on how Mail-in-a-Box handles your privacy, see the [security details page](security.md).
@@ -52,13 +54,13 @@ Installation
 
 See the [setup guide](https://mailinabox.email/guide.html) for detailed, user-friendly instructions.
 
-For experts, start with a completely fresh (really, I mean it) Ubuntu 18.04 LTS 64-bit machine. On the machine...
+For experts, start with a completely fresh (really, I mean it) Ubuntu 22.04 LTS 64-bit machine. On the machine...
 
 Clone this repository and checkout the tag corresponding to the most recent release:
 
 	$ git clone https://github.com/mail-in-a-box/mailinabox
 	$ cd mailinabox
-	$ git checkout v0.54
+	$ git checkout v61.1
 
 Begin the installation.
 
