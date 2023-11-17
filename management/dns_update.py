@@ -1001,10 +1001,6 @@ def get_secondary_dns(custom_dns, domain, mode=None):
 		if qname != '_secondary_nameserver': continue
 		for hostname in value.split(" "):
 			hostname = hostname.strip()
-			if mode == None:
-				# Just return the setting.
-				values.append(hostname)
-				continue
 
 			# This is a domain specifier
 			# For example: ns2.forall.com dom:domain1.org;domain2.com ns2.fordomain1and2.com xfr:1.2.3.4 dom:domain3.com ns2.fordomain3.com xfr:2.3.4.5
@@ -1016,8 +1012,14 @@ def get_secondary_dns(custom_dns, domain, mode=None):
 						break
 					domains.append(dom)
 				continue
+
 			# if the domain in question is not specied (or not "all") skip it.
 			if domains and domain and domain not in domains: continue
+
+			if mode == None:
+				# Just return the setting.
+				values.append(hostname)
+				continue
 
 			# If the entry starts with "xfr:" only include it in the zone transfer settings.
 			if hostname.startswith("xfr:"):
