@@ -1004,17 +1004,18 @@ def get_secondary_dns(custom_dns, domain, mode=None):
 
 			# This is a domain specifier
 			# For example: ns2.forall.com dom:domain1.org;domain2.com ns2.fordomain1and2.com xfr:1.2.3.4 dom:domain3.com ns2.fordomain3.com xfr:2.3.4.5
-			if hostname.startswith("dom:"):
-				domains = []
-				for dom in hostname[4:].split(";"):
-					if dom == "all":
-						domains = []
-						break
-					domains.append(dom)
-				continue
+			if domain != "":
+				if hostname.startswith("dom:"):
+					domains = []
+					for dom in hostname[4:].split(";"):
+						if dom == "all":
+							domains = []
+							break
+						domains.append(dom)
+					continue
 
-			# if the domain in question is not specied (or not "all") skip it.
-			if domains and domain and domain not in domains: continue
+				# if the domain in question is not specied (or not "all") skip it.
+				if domains and domain and domain not in domains: continue
 
 			if mode == None:
 				# Just return the setting.
