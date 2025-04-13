@@ -10,3 +10,4 @@ api/docs/api-docs.html
 /.vs/ProjectSettings.json
 /.vs/mailinabox
 *.code-workspace
+/.vs
