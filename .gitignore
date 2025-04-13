@@ -9,3 +9,4 @@ api/docs/api-docs.html
 /.vs/slnx.sqlite
 /.vs/ProjectSettings.json
 /.vs/mailinabox
+*.code-workspace
