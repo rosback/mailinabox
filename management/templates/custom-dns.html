@@ -84,7 +84,7 @@
   <div class="form-group">
     <label for="secondarydnsHostname" class="col-sm-1 control-label">Hostname</label>
     <div class="col-sm-10">
-      <textarea class="form-control" id="secondarydnsHostname" placeholder="ns1.cloudprovider.com" rows="6" cols="6" ></textarea>
+      <textarea class="form-control" id="secondarydnsHostname" placeholder="ns1.cloudprovider.com" rows="12" cols="6" ></textarea>
     </div>
   </div>
   <div class="form-group">
@@ -169,13 +169,62 @@ curl -X DELETE -d "some text here" https://{{hostname}}/admin/dns/custom/foo.myd
 </pre>
 
 <script>
+
+function normalize_secondary_dns_text(value) {
+  return (value || '').trim().split(/\s+/).filter(Boolean).join(' ');
+}
+
+function format_secondary_dns_text(value) {
+  var normalized = normalize_secondary_dns_text(value);
+  if (normalized === '') return '';
+
+  var tokens = normalized.split(/\s+/).filter(Boolean);
+  var lines = [];
+  var ns = [];
+  var xfr = [];
+
+  function flush() {
+    if (ns.length > 0) {
+      lines.push(ns.join(' '));
+      ns = [];
+    }
+    if (xfr.length > 0) {
+      lines.push(xfr.join(' '));
+      xfr = [];
+    }
+  }
+
+  try {
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i];
+
+      if (token.indexOf('dom:') === 0) {
+        flush();
+        if (lines.length > 0 && lines[lines.length - 1] !== '') {
+          lines.push('');
+        }
+        lines.push(token);
+      } else if (token.indexOf('xfr:') === 0) {
+        xfr.push(token);
+      } else {
+        ns.push(token);
+      }
+    }
+
+    flush();
+    return lines.join('\n');
+  } catch (e) {
+    return value || '';
+  }
+}
+
 function show_custom_dns() {
   api(
     "/dns/secondary-nameserver",
     "GET",
     { },
     function(data) {
-      $('#secondarydnsHostname').val(data.hostnames.join(' '));
+      $('#secondarydnsHostname').val(format_secondary_dns_text(data.hostnames.join(' ')));
       $('#secondarydns-clear-instructions').toggle(data.hostnames.length > 0);
     });
 
@@ -247,18 +296,25 @@ function delete_custom_dns_record(elem) {
 }
 
 function do_set_secondary_dns() {
- api(
+  var rawValue = $('#secondarydnsHostname').val();
+  var normalizedValue = normalize_secondary_dns_text(rawValue);
+
+  api(
     "/dns/secondary-nameserver",
     "POST",
     {
-      hostnames: $('#secondarydnsHostname').val()
+      hostnames: normalizedValue
     },
     function(data) {
+      // Only after the server accepted the value do we reformat the textarea.
+      $('#secondarydnsHostname').val(format_secondary_dns_text(normalizedValue));
+
       if (data == "") return; // nothing updated
       show_modal_error("Secondary DNS", $("<pre/>").text(data));
       $('#secondarydns-clear-instructions').slideDown();
     },
     function(err) {
+      // Leave the textarea exactly as the user typed it when the server rejects it.
       show_modal_error("Secondary DNS", $("<pre/>").text(err));
     });
 }
